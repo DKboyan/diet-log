@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>饮食记录</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="饮食记录">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+<main>
+
+  <!-- ============ 记录页 ============ -->
+  <section class="page active" id="page-record">
+    <div class="date-nav">
+      <button class="nav-arrow" id="nav-prev">‹</button>
+      <div class="date-title">
+        <div class="d-main" id="d-main">7月28日 周二</div>
+        <div class="d-sub" id="d-sub">今天</div>
+        <input type="date" id="date-input">
+      </div>
+      <div style="display:flex;align-items:center;gap:2px">
+        <button class="btn-today" id="btn-today">回今天</button>
+        <button class="nav-arrow" id="nav-next">›</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="summary-flex">
+        <div class="ring-wrap">
+          <div id="ring-box"></div>
+          <div class="ring-center">
+            <div class="rc-val" id="rc-val">0</div>
+            <div class="rc-unit">大卡</div>
+          </div>
+        </div>
+        <div class="summary-right">
+          <div class="sum-line">
+            <div class="sl-head" id="cal-head">热量</div>
+            <div class="sl-track"><div class="sl-fill cal" id="cal-fill" style="width:0%"></div></div>
+          </div>
+          <div class="sum-line">
+            <div class="sl-head" id="pro-head">蛋白质</div>
+            <div class="sl-track"><div class="sl-fill pro" id="pro-fill" style="width:0%"></div></div>
+          </div>
+          <div class="sum-note" id="sum-note"></div>
+          <div class="weight-link" id="weight-line"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card add-form">
+      <h2>记一笔</h2>
+      <div class="row1">
+        <input id="f-name" list="food-datalist" placeholder="吃了什么？如：鸡胸肉 150g" autocomplete="off">
+        <datalist id="food-datalist"></datalist>
+      </div>
+      <div class="num-row">
+        <div class="num-box"><input id="f-cal" type="number" inputmode="numeric" min="0" placeholder="热量"><span class="unit">大卡</span></div>
+        <div class="num-box"><input id="f-pro" type="number" inputmode="decimal" min="0" step="0.1" placeholder="蛋白质"><span class="unit">克</span></div>
+      </div>
+      <div class="meal-seg" id="meal-seg"></div>
+      <div class="form-btns">
+        <button class="btn-primary" id="btn-add">添加</button>
+        <button class="btn-ghost hidden" id="btn-cancel">取消</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>常用食物 · 点一下直接记入当前餐</h2>
+      <div class="chips" id="chips"></div>
+    </div>
+
+    <div class="card">
+      <h2>当天记录 · 点条目可修改</h2>
+      <div id="entries"></div>
+    </div>
+  </section>
+
+  <!-- ============ 体重页 ============ -->
+  <section class="page" id="page-weight">
+    <div class="card">
+      <h2>记体重</h2>
+      <div class="w-form">
+        <input type="date" id="w-date">
+        <div class="num-box"><input id="w-input" type="number" inputmode="decimal" step="0.1" min="20" placeholder="体重"><span class="unit">kg</span></div>
+        <button class="btn-primary" id="btn-weight">保存</button>
+      </div>
+    </div>
+
+    <div class="stat-row">
+      <div class="stat-tile"><div class="st-label">最新体重</div><div class="st-val" id="w-latest">—</div></div>
+      <div class="stat-tile"><div class="st-label">7日均值</div><div class="st-val" id="w-avg7">—</div></div>
+      <div class="stat-tile"><div class="st-label">30天变化</div><div class="st-val" id="w-delta30">—</div></div>
+      <div class="stat-tile"><div class="st-label">BMI</div><div class="st-val" id="w-bmi">—</div></div>
+    </div>
+
+    <div class="card">
+      <h2>体重趋势</h2>
+      <div class="range-seg" id="w-range">
+        <button data-r="30" class="sel">30天</button>
+        <button data-r="90">90天</button>
+        <button data-r="0">全部</button>
+      </div>
+      <div class="chart-box"><div id="w-chart"></div><div class="tooltip" id="w-tip"></div></div>
+    </div>
+
+    <div class="card">
+      <h2>最近记录</h2>
+      <div id="w-list"></div>
+    </div>
+  </section>
+
+  <!-- ============ 统计页 ============ -->
+  <section class="page" id="page-stats">
+    <div class="stat-row">
+      <div class="stat-tile"><div class="st-label">7日平均热量</div><div class="st-val" id="st-cal7">—</div></div>
+      <div class="stat-tile"><div class="st-label">7日平均蛋白</div><div class="st-val" id="st-pro7">—</div></div>
+    </div>
+    <div class="stat-row">
+      <div class="stat-tile"><div class="st-label">近7天蛋白达标</div><div class="st-val" id="st-prohit">—</div></div>
+      <div class="stat-tile"><div class="st-label">连续记录</div><div class="st-val" id="st-streak">—</div></div>
+    </div>
+
+    <div class="card">
+      <h2>最近 14 天热量（虚线为目标）</h2>
+      <div class="chart-box"><div id="cal-chart"></div><div class="tooltip" id="cal-tip"></div></div>
+      <div class="axis-note">鼠标移到柱子上可看每天的热量和蛋白质明细</div>
+    </div>
+  </section>
+
+  <!-- ============ 设置页 ============ -->
+  <section class="page" id="page-settings">
+    <div class="card">
+      <h2>每日目标</h2>
+      <div class="set-row">
+        <label>热量目标<span class="set-hint">维持体重约为 体重kg × 31</span></label>
+        <input id="set-cal" type="number" inputmode="numeric" min="1"> 大卡
+      </div>
+      <div class="set-row">
+        <label>蛋白质目标<span class="set-hint">力量训练建议 体重kg × 1.6~2.2</span></label>
+        <input id="set-pro" type="number" inputmode="numeric" min="1"> 克
+      </div>
+      <div class="set-row">
+        <label>目标体重<span class="set-hint">选填，会画在趋势图上</span></label>
+        <input id="set-weight" type="number" inputmode="decimal" step="0.1"> kg
+      </div>
+      <div class="set-row">
+        <label>身高<span class="set-hint">选填，用于计算 BMI</span></label>
+        <input id="set-height" type="number" inputmode="numeric"> cm
+      </div>
+      <div style="margin-top:12px">
+        <button class="btn-primary" id="btn-save-set" style="width:100%">保存目标</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>数据</h2>
+      <div class="set-actions">
+        <button id="btn-export-json">导出备份（JSON）</button>
+        <button id="btn-export-csv">导出表格（CSV）</button>
+        <button id="btn-import">导入备份</button>
+        <button id="btn-clear" class="danger">清空全部数据</button>
+      </div>
+    </div>
+    <div class="about">数据只保存在这台电脑上 · 记得偶尔导出备份</div>
+  </section>
+
+</main>
+
+<!-- 底部标签栏 -->
+<nav class="tabbar"><div class="tabbar-inner">
+  <button id="tab-record" class="sel"><span class="t-ico">🍚</span>记录</button>
+  <button id="tab-weight"><span class="t-ico">⚖️</span>体重</button>
+  <button id="tab-stats"><span class="t-ico">📊</span>统计</button>
+  <button id="tab-settings"><span class="t-ico">⚙️</span>设置</button>
+</div></nav>
+
+<!-- Toast -->
+<div id="toast"><span id="toast-msg"></span><button id="toast-undo">撤销</button></div>
+
+<!-- 导入/导出模态 -->
+<div class="modal-mask" id="modal-io">
+  <div class="modal">
+    <h3 id="io-title"></h3>
+    <p id="io-msg"></p>
+    <textarea id="io-text" spellcheck="false"></textarea>
+    <div class="m-btns">
+      <button class="btn-ghost" id="io-close">关闭</button>
+      <button class="btn-primary" id="io-copy">复制</button>
+      <button class="btn-primary hidden" id="io-import">导入</button>
+    </div>
+  </div>
+</div>
+
+<!-- 确认模态 -->
+<div class="modal-mask" id="modal-confirm">
+  <div class="modal">
+    <h3 id="cf-title"></h3>
+    <p id="cf-msg"></p>
+    <div class="m-btns">
+      <button class="btn-ghost" id="cf-cancel">取消</button>
+      <button class="btn-danger" id="cf-ok">确认</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+native/launch
+native/*.png
+native/app.iconset/
+native/icon_1024.png
+.DS_Store
