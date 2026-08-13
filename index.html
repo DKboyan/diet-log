@@ -75,7 +75,12 @@
     </div>
 
     <div class="card">
-      <h2>常用食物 · 点一下直接记入当前餐</h2>
+      <h2>食物库 · 点一个，填克数，热量自动算</h2>
+      <div class="chips" id="lib-chips"></div>
+    </div>
+
+    <div class="card">
+      <h2>常用食物 · 点一下按原样记入</h2>
       <div class="chips" id="chips"></div>
     </div>
 
@@ -197,6 +202,46 @@
       <button class="btn-ghost" id="io-close">关闭</button>
       <button class="btn-primary" id="io-copy">复制</button>
       <button class="btn-primary hidden" id="io-import">导入</button>
+    </div>
+  </div>
+</div>
+
+<!-- 食物库：填用量模态 -->
+<div class="modal-mask" id="modal-amt">
+  <div class="modal">
+    <h3 id="amt-title"></h3>
+    <p id="amt-info"></p>
+    <div class="num-row" style="margin-bottom:8px">
+      <div class="num-box"><input id="amt-input" type="number" inputmode="decimal" min="0" placeholder="吃了多少"><span class="unit" id="amt-unit">克</span></div>
+    </div>
+    <p class="amt-preview" id="amt-preview">　</p>
+    <div class="m-btns">
+      <button class="btn-ghost m-left" id="amt-edit">编辑食物</button>
+      <button class="btn-ghost" id="amt-cancel">取消</button>
+      <button class="btn-primary" id="amt-ok">记入</button>
+    </div>
+  </div>
+</div>
+
+<!-- 食物库：新建/编辑食物模态 -->
+<div class="modal-mask" id="modal-food">
+  <div class="modal">
+    <h3 id="food-title">新建食物</h3>
+    <div class="food-form">
+      <input id="food-name" placeholder="食物名称，如：鸡胸肉" autocomplete="off">
+      <div class="meal-seg" id="food-unit-seg">
+        <button data-u="g100">按 100 克算</button>
+        <button data-u="serving">按份 / 个算</button>
+      </div>
+      <div class="num-row">
+        <div class="num-box"><input id="food-cal" type="number" inputmode="decimal" min="0" placeholder="热量"><span class="unit" id="food-cal-unit">大卡/100克</span></div>
+        <div class="num-box"><input id="food-pro" type="number" inputmode="decimal" min="0" step="0.1" placeholder="蛋白质"><span class="unit" id="food-pro-unit">蛋白/100克</span></div>
+      </div>
+    </div>
+    <div class="m-btns">
+      <button class="btn-ghost danger hidden m-left" id="food-del">删除</button>
+      <button class="btn-ghost" id="food-cancel">取消</button>
+      <button class="btn-primary" id="food-save">保存</button>
     </div>
   </div>
 </div>

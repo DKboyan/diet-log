@@ -5,8 +5,9 @@
 const KEY = 'diet.v1';
 const DEFAULTS = {
   settings: { calTarget: 2200, proTarget: 140, weightTarget: null, height: null },
-  days: {},   // "2026-07-28": { entries:[{id,name,cal,pro,meal,ts}], weight: 82.5 }
-  foods: {},  // "鸡胸肉100g": { cal, pro, count, last }
+  days: {},     // "2026-07-28": { entries:[{id,name,cal,pro,meal,ts}], weight: 82.5 }
+  foods: {},    // 自动记住的常用食物 "鸡胸肉100g": { cal, pro, count, last }
+  library: [],  // 食物库 [{id,name,unit:'g100'|'serving',cal,pro,count,last,lastAmt}]
 };
 
 let state = load();
@@ -28,12 +29,39 @@ function load() {
   try { local = parseRaw(localStorage.getItem(KEY)); } catch (e) { local = null; }
   const d = ((native && native._rev || 0) >= (local && local._rev || 0)) ? (native || local) : local;
   if (!d) return JSON.parse(JSON.stringify(DEFAULTS));
-  return {
+  // 以 d 打底透传未知字段：旧版本的壳/备份读到新版数据时不会把新字段剥掉再落盘
+  return Object.assign({}, d, {
     settings: Object.assign({}, DEFAULTS.settings, d.settings || {}),
     days: d.days || {},
     foods: d.foods || {},
-  };
+    library: sanitizeLibrary(d.library),
+  });
 }
+
+// 食物库元素可能来自导入的备份，逐个校验收敛，防 NaN/Infinity/注入/缺字段
+function sanitizeLibrary(arr) {
+  if (!Array.isArray(arr)) return [];
+  const out = [];
+  for (const f of arr) {
+    if (!f || typeof f !== 'object') continue;
+    const name = String(f.name || '').trim();
+    if (!name) continue;
+    const cal = Number(f.cal), pro = Number(f.pro);
+    out.push({
+      id: (typeof f.id === 'string' && f.id) ? f.id : uid(),
+      name: name.slice(0, 60),
+      unit: f.unit === 'serving' ? 'serving' : 'g100',
+      cal: (Number.isFinite(cal) && cal >= 0 && cal <= 10000) ? Math.round(cal * 10) / 10 : 0,
+      pro: (Number.isFinite(pro) && pro >= 0 && pro <= 5000) ? Math.round(pro * 10) / 10 : 0,
+      count: Number.isFinite(Number(f.count)) ? Number(f.count) : 0,
+      last: Number.isFinite(Number(f.last)) ? Number(f.last) : 0,
+      lastAmt: (Number.isFinite(Number(f.lastAmt)) && Number(f.lastAmt) > 0) ? Number(f.lastAmt) : null,
+    });
+  }
+  return out;
+}
+
+function validNum(v, max) { return Number.isFinite(v) && v >= 0 && v <= max; }
 
 function save() {
   state._rev = Date.now();
@@ -60,6 +88,19 @@ let viewDate = todayStr();
 /* ================= 通用小组件 ================= */
 const $ = sel => document.querySelector(sel);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// 中文输入法里按 Enter 是「上屏确认候选词」，不能当成提交。
+// Safari/WKWebView 的 compositionend 先于那次 keydown 派发且 isComposing 为 false，
+// 所以除了标准判断，还要看是否刚结束过合成。
+let lastCompEnd = 0;
+document.addEventListener('compositionend', () => { lastCompEnd = Date.now(); }, true);
+function bindEnter(el, fn) {
+  el.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    if (e.isComposing || e.keyCode === 229 || Date.now() - lastCompEnd < 120) return;
+    fn();
+  });
+}
 
 let toastTimer = null, undoFn = null;
 function toast(msg, undo) {
@@ -178,7 +219,7 @@ function renderChips() {
     return;
   }
   box.innerHTML = top.map(([name, f], i) =>
-    '<button class="chip" data-i="' + i + '">' + esc(name) + '<small>' + f.cal + '大卡</small></button>').join('');
+    '<button class="chip" data-i="' + i + '">' + esc(name) + '<small>' + esc(String(f.cal)) + '大卡</small></button>').join('');
   document.querySelectorAll('#chips .chip').forEach(b => {
     b.onclick = () => {
       const [name, f] = top[b.dataset.i];
@@ -201,7 +242,9 @@ function renderEntries() {
     if (cp) cp.onclick = () => {
       const cur = ensureDay(viewDate);
       for (const e of prev.entries) {
-        cur.entries.push({ id: uid(), name: e.name, cal: e.cal, pro: e.pro, meal: e.meal, ts: Date.now() });
+        const c = { id: uid(), name: e.name, cal: e.cal, pro: e.pro, meal: e.meal, ts: Date.now() };
+        if (e.lib) c.lib = true;
+        cur.entries.push(c);
       }
       save(); renderRecord(); toast('已复制 ' + prev.entries.length + ' 条记录');
     };
@@ -240,11 +283,133 @@ function learnFood(name, cal, pro) {
   state.foods[name] = f;
 }
 
-function addEntry(name, cal, pro, meal) {
-  ensureDay(viewDate).entries.push({ id: uid(), name, cal, pro, meal, ts: Date.now() });
-  learnFood(name, cal, pro);
+function addEntry(name, cal, pro, meal, opts) {
+  const e = { id: uid(), name, cal, pro, meal, ts: Date.now() };
+  if (opts && opts.lib) e.lib = true; // 标记来自食物库，编辑时也不进常用食物
+  ensureDay(viewDate).entries.push(e);
+  // 食物库带克数的条目不进「常用食物」，不然会被各种克数变体挤满
+  if (!opts || opts.learn !== false) learnFood(name, cal, pro);
   save();
   renderRecord();
+}
+
+/* ================= 食物库 ================= */
+let amtFood = null;   // 正在填用量的食物
+let editFood = null;  // 正在编辑的食物（null = 新建）
+let foodUnit = 'g100';
+
+function unitWord(f) { return f.unit === 'serving' ? '份' : '克'; }
+function perWord(f) { return f.unit === 'serving' ? '每份' : '每100克'; }
+
+function renderLibrary() {
+  const box = $('#lib-chips');
+  const foods = [...state.library].sort((a, b) =>
+    (b.count || 0) - (a.count || 0) || (b.last || 0) - (a.last || 0));
+  let html = foods.map(f =>
+    '<button class="chip" data-id="' + esc(f.id) + '">' + esc(f.name) +
+    '<small>' + esc(String(f.cal)) + '大卡/' + (f.unit === 'serving' ? '份' : '100克') + '</small></button>').join('');
+  html += '<button class="chip chip-new" id="lib-new">＋ 新建食物</button>';
+  if (!foods.length) {
+    html = '<div class="chips-empty">把常吃的食物存进来（如：鸡胸肉，每100克 133大卡 / 31克蛋白），' +
+      '以后点一下、填个克数，热量自动算好。</div>' + html;
+  }
+  box.innerHTML = html;
+  box.querySelectorAll('.chip[data-id]').forEach(b => { b.onclick = () => openAmt(b.dataset.id); });
+  $('#lib-new').onclick = () => openFoodModal(null);
+}
+
+function openAmt(id) {
+  const f = state.library.find(x => x.id === id);
+  if (!f) return;
+  amtFood = f;
+  $('#amt-title').textContent = f.name;
+  $('#amt-info').textContent = perWord(f) + ' ' + f.cal + ' 大卡 · 蛋白质 ' + f.pro + ' 克';
+  $('#amt-unit').textContent = unitWord(f);
+  const inp = $('#amt-input');
+  inp.value = f.lastAmt || (f.unit === 'serving' ? 1 : 100);
+  updateAmtPreview();
+  $('#modal-amt').classList.add('show');
+  // iOS 只在用户手势的同步调用栈里允许 focus 弹键盘，不能用 setTimeout
+  inp.focus(); inp.select();
+}
+
+function amtCompute() {
+  const amt = parseFloat($('#amt-input').value);
+  if (!amtFood || !Number.isFinite(amt) || amt <= 0 || amt > 10000) return null;
+  const k = amtFood.unit === 'serving' ? amt : amt / 100;
+  return { amt, cal: Math.round(amtFood.cal * k), pro: Math.round(amtFood.pro * k * 10) / 10 };
+}
+
+function updateAmtPreview() {
+  const c = amtCompute();
+  $('#amt-preview').textContent = c ? '≈ ' + c.cal + ' 大卡 · 蛋白质 ' + c.pro + ' 克 · 记入' + selMeal : '　';
+}
+
+function submitAmt() {
+  const c = amtCompute();
+  if (!c) { toast('请输入数量'); return; }
+  const name = amtFood.name + ' ' + c.amt + unitWord(amtFood);
+  amtFood.lastAmt = c.amt;
+  amtFood.count = (amtFood.count || 0) + 1;
+  amtFood.last = Date.now();
+  $('#modal-amt').classList.remove('show');
+  addEntry(name, c.cal, c.pro, selMeal, { learn: false, lib: true });
+  toast('已添加「' + name + '」');
+}
+
+function openFoodModal(id) {
+  editFood = id ? state.library.find(x => x.id === id) : null;
+  foodUnit = editFood ? editFood.unit : 'g100';
+  $('#food-title').textContent = editFood ? '编辑食物' : '新建食物';
+  $('#food-name').value = editFood ? editFood.name : '';
+  $('#food-cal').value = editFood ? editFood.cal : '';
+  $('#food-pro').value = editFood ? editFood.pro : '';
+  $('#food-del').classList.toggle('hidden', !editFood);
+  renderUnitSeg();
+  $('#modal-food').classList.add('show');
+  $('#food-name').focus();
+}
+
+function renderUnitSeg() {
+  document.querySelectorAll('#food-unit-seg button').forEach(b => {
+    b.classList.toggle('sel', b.dataset.u === foodUnit);
+  });
+  const u = foodUnit === 'serving' ? '/份' : '/100克';
+  $('#food-cal-unit').textContent = '大卡' + u;
+  $('#food-pro-unit').textContent = '蛋白' + u;
+}
+
+function saveFood() {
+  const name = $('#food-name').value.trim();
+  const cal = parseFloat($('#food-cal').value);
+  const pro = parseFloat($('#food-pro').value);
+  if (!name) { toast('请填写食物名称'); $('#food-name').focus(); return; }
+  if (!validNum(cal, 10000)) { toast('请填写热量'); $('#food-cal').focus(); return; }
+  const c = Math.round(cal * 10) / 10;
+  const p = validNum(pro, 5000) ? Math.round(pro * 10) / 10 : 0;
+  if (editFood) {
+    // 换了计量单位后，上次填的数量就没意义了，清掉防止按错单位预填
+    if (editFood.unit !== foodUnit) editFood.lastAmt = null;
+    editFood.name = name; editFood.unit = foodUnit; editFood.cal = c; editFood.pro = p;
+  } else {
+    state.library.push({ id: uid(), name, unit: foodUnit, cal: c, pro: p, count: 0, last: 0, lastAmt: null });
+  }
+  save();
+  $('#modal-food').classList.remove('show');
+  renderLibrary();
+  toast('已保存「' + name + '」');
+}
+
+function delFood() {
+  if (!editFood) return;
+  const f = editFood;
+  uiConfirm('删除食物', '「' + f.name + '」会从食物库移除，已记录的条目不受影响。', true, () => {
+    state.library = state.library.filter(x => x.id !== f.id);
+    save();
+    $('#modal-food').classList.remove('show');
+    renderLibrary();
+    toast('已删除「' + f.name + '」');
+  });
 }
 
 function delEntry(id) {
@@ -288,12 +453,12 @@ function submitForm() {
   const cal = parseFloat($('#f-cal').value);
   const pro = parseFloat($('#f-pro').value);
   if (!name) { toast('请填写食物名称'); $('#f-name').focus(); return; }
-  if (!(cal >= 0)) { toast('请填写热量（大卡）'); $('#f-cal').focus(); return; }
-  const p = pro >= 0 ? Math.round(pro * 10) / 10 : 0;
+  if (!validNum(cal, 50000)) { toast('请填写热量（大卡）'); $('#f-cal').focus(); return; }
+  const p = validNum(pro, 5000) ? Math.round(pro * 10) / 10 : 0;
   const c = Math.round(cal);
   if (editId) {
     const e = ensureDay(viewDate).entries.find(x => x.id === editId);
-    if (e) { e.name = name; e.cal = c; e.pro = p; e.meal = selMeal; learnFood(name, c, p); }
+    if (e) { e.name = name; e.cal = c; e.pro = p; e.meal = selMeal; if (!e.lib) learnFood(name, c, p); }
     save();
     const kept = '已保存修改';
     cancelEdit(); renderRecord(); toast(kept);
@@ -308,6 +473,7 @@ function submitForm() {
 function renderRecord() {
   renderDateNav();
   renderSummary();
+  renderLibrary();
   renderChips();
   renderEntries();
 }
@@ -589,7 +755,7 @@ function exportCSV() {
 }
 
 function importJSON() {
-  openIOModal('导入备份', '把之前导出的 JSON 粘贴到下面，点「导入」。会覆盖当前数据。', '', true);
+  openIOModal('导入备份', '把之前导出的 JSON 粘贴到下面，点「导入」。会覆盖当前数据（旧备份里没有食物库时，现有食物库会保留）。', '', true);
 }
 
 function openIOModal(title, msg, content, isImport) {
@@ -623,11 +789,13 @@ function doImport() {
   let d;
   try { d = JSON.parse(raw); } catch (e) { toast('格式不对：不是有效的 JSON'); return; }
   if (!d || typeof d !== 'object' || !d.days) { toast('格式不对：缺少数据字段'); return; }
-  state = {
+  // 与 load() 一致：以 d 打底透传未知字段；食物库上线前的旧备份没有 library 字段，保留现有的
+  state = Object.assign({}, d, {
     settings: Object.assign({}, DEFAULTS.settings, d.settings || {}),
     days: d.days || {},
     foods: d.foods || {},
-  };
+    library: d.library === undefined ? state.library : sanitizeLibrary(d.library),
+  });
   save();
   $('#modal-io').classList.remove('show');
   renderAll();
@@ -635,7 +803,7 @@ function doImport() {
 }
 
 function clearAll() {
-  uiConfirm('清空全部数据', '所有饮食和体重记录都会被删除，且无法恢复。建议先导出一份 JSON 备份。', true, () => {
+  uiConfirm('清空全部数据', '所有饮食记录、体重记录和食物库都会被删除，且无法恢复。建议先导出一份 JSON 备份。', true, () => {
     state = JSON.parse(JSON.stringify(DEFAULTS));
     save(); renderAll(); toast('已清空');
   });
@@ -670,16 +838,14 @@ document.addEventListener('DOMContentLoaded', () => {
   // 表单
   $('#btn-add').onclick = submitForm;
   $('#btn-cancel').onclick = cancelEdit;
-  ['f-name', 'f-cal', 'f-pro'].forEach(id => {
-    $('#' + id).addEventListener('keydown', e => { if (e.key === 'Enter') submitForm(); });
-  });
+  ['f-name', 'f-cal', 'f-pro'].forEach(id => bindEnter($('#' + id), submitForm));
   $('#f-name').addEventListener('change', () => {
     const f = state.foods[$('#f-name').value.trim()];
     if (f && !$('#f-cal').value) { $('#f-cal').value = f.cal; $('#f-pro').value = f.pro; }
   });
   // 体重
   $('#btn-weight').onclick = submitWeight;
-  $('#w-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitWeight(); });
+  bindEnter($('#w-input'), submitWeight);
   document.querySelectorAll('#w-range button').forEach(b => {
     b.onclick = () => {
       weightRange = +b.dataset.r;
@@ -698,6 +864,23 @@ document.addEventListener('DOMContentLoaded', () => {
   $('#io-copy').onclick = doCopy;
   $('#io-import').onclick = doImport;
   $('#cf-cancel').onclick = () => $('#modal-confirm').classList.remove('show');
+  // 食物库
+  $('#amt-cancel').onclick = () => $('#modal-amt').classList.remove('show');
+  $('#amt-ok').onclick = submitAmt;
+  $('#amt-input').addEventListener('input', updateAmtPreview);
+  bindEnter($('#amt-input'), submitAmt);
+  $('#amt-edit').onclick = () => {
+    const id = amtFood && amtFood.id;
+    $('#modal-amt').classList.remove('show');
+    if (id) openFoodModal(id);
+  };
+  document.querySelectorAll('#food-unit-seg button').forEach(b => {
+    b.onclick = () => { foodUnit = b.dataset.u; renderUnitSeg(); };
+  });
+  $('#food-cancel').onclick = () => $('#modal-food').classList.remove('show');
+  $('#food-save').onclick = saveFood;
+  $('#food-del').onclick = delFood;
+  ['food-name', 'food-cal', 'food-pro'].forEach(id => bindEnter($('#' + id), saveFood));
   // Toast 撤销
   $('#toast-undo').onclick = () => { if (undoFn) undoFn(); $('#toast').style.display = 'none'; undoFn = null; };
   // 标签栏

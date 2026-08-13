@@ -228,6 +228,46 @@ main {
 .chip small { color: var(--muted); font-size: 11px; margin-left: 4px; font-variant-numeric: tabular-nums; }
 .chip:active { background: var(--accent-soft); border-color: var(--accent); }
 .chips-empty { font-size: 13px; color: var(--muted); }
+.chip-new {
+  border-style: dashed;
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---------- 食物库模态 ---------- */
+.amt-preview {
+  font-size: 13px;
+  color: var(--ink-2);
+  margin-bottom: 12px;
+  min-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.food-form input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  width: 100%;
+  outline: none;
+  margin-bottom: 8px;
+}
+.food-form input:focus { border-color: var(--accent); }
+.food-form input::placeholder { color: var(--muted); }
+.food-form .num-row { margin-bottom: 12px; }
+.food-form .num-row input { margin-bottom: 0; }
+.modal .m-btns .m-left { margin-right: auto; }
+.modal .m-btns .danger { color: var(--critical); border-color: var(--critical); }
+#modal-amt .num-box input, #modal-amt .unit { font-variant-numeric: tabular-nums; }
+#modal-amt .num-box input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  width: 100%;
+  outline: none;
+}
+#modal-amt .num-box input:focus { border-color: var(--accent); }
 
 /* ---------- 记录列表 ---------- */
 .meal-group { margin-bottom: 4px; }
@@ -390,10 +430,11 @@ main {
 .tabbar button.sel .t-ico { filter: none; opacity: 1; }
 
 /* ---------- Toast ---------- */
+/* 顶部弹出：模态遮罩(z40)和 iOS 软键盘都挡不住它 */
 #toast {
   position: fixed;
   left: 50%; transform: translateX(-50%);
-  bottom: calc(72px + env(safe-area-inset-bottom));
+  top: calc(14px + env(safe-area-inset-top));
   background: var(--ink);
   color: var(--bg);
   border-radius: 999px;
@@ -402,20 +443,24 @@ main {
   display: none;
   align-items: center;
   gap: 12px;
-  z-index: 30;
+  z-index: 60;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
   white-space: nowrap;
+  max-width: calc(100vw - 24px);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 #toast button { color: var(--warn); font-weight: 700; font-size: 13px; }
 
 /* ---------- 模态框 ---------- */
+/* 顶部对齐：iOS 键盘弹出时不遮住模态框的按钮 */
 .modal-mask {
   position: fixed; inset: 0;
   background: rgba(0, 0, 0, 0.45);
   display: none;
-  align-items: center; justify-content: center;
+  align-items: flex-start; justify-content: center;
   z-index: 40;
-  padding: 20px;
+  padding: max(48px, 10vh) 20px 20px;
 }
 .modal-mask.show { display: flex; }
 .modal {
