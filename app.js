@@ -4,11 +4,16 @@
 /* ================= 数据层 ================= */
 const KEY = 'diet.v1';
 const DEFAULTS = {
-  settings: { calTarget: 2200, proTarget: 140, weightTarget: null, height: null },
-  days: {},     // "2026-07-28": { entries:[{id,name,cal,pro,meal,ts}], weight: 82.5 }
-  foods: {},    // 自动记住的常用食物 "鸡胸肉100g": { cal, pro, count, last }
-  library: [],  // 食物库 [{id,name,unit:'g100'|'serving',cal,pro,count,last,lastAmt}]
+  // fatTarget/carbTarget 选填：填了汇总卡才显示进度条
+  settings: { calTarget: 2200, proTarget: 140, fatTarget: null, carbTarget: null, weightTarget: null, height: null },
+  days: {},     // "2026-07-28": { entries:[{id,name,cal,pro,fat,carb,meal,ts}], weight: 82.5 }
+  foods: {},    // 自动记住的常用食物 "鸡胸肉100g": { cal, pro, fat, carb, count, last }
+  // 食物库：unit 'g100' 时 cal/pro/fat/carb 是「每 base 克」的含量（base 默认 100，可自定义）；
+  // unit 'serving' 时是每份的含量
+  library: [],
 };
+
+const r1 = v => Math.round(v * 10) / 10;
 
 let state = load();
 
@@ -46,17 +51,22 @@ function sanitizeLibrary(arr) {
     if (!f || typeof f !== 'object') continue;
     const name = String(f.name || '').trim();
     if (!name) continue;
-    const cal = Number(f.cal), pro = Number(f.pro);
-    out.push({
+    const cal = Number(f.cal), pro = Number(f.pro), fat = Number(f.fat), carb = Number(f.carb), base = Number(f.base);
+    const g = (v, max) => (Number.isFinite(v) && v >= 0 && v <= max) ? r1(v) : 0;
+    // 以 f 打底：条目级未知字段也透传，和 load() 的不变式保持一致
+    out.push(Object.assign({}, f, {
       id: (typeof f.id === 'string' && f.id) ? f.id : uid(),
       name: name.slice(0, 60),
       unit: f.unit === 'serving' ? 'serving' : 'g100',
-      cal: (Number.isFinite(cal) && cal >= 0 && cal <= 10000) ? Math.round(cal * 10) / 10 : 0,
-      pro: (Number.isFinite(pro) && pro >= 0 && pro <= 5000) ? Math.round(pro * 10) / 10 : 0,
+      base: (Number.isFinite(base) && base > 0 && base <= 10000) ? r1(base) : 100,
+      cal: g(cal, 10000),
+      pro: g(pro, 5000),
+      fat: g(fat, 5000),
+      carb: g(carb, 5000),
       count: Number.isFinite(Number(f.count)) ? Number(f.count) : 0,
       last: Number.isFinite(Number(f.last)) ? Number(f.last) : 0,
       lastAmt: (Number.isFinite(Number(f.lastAmt)) && Number(f.lastAmt) > 0) ? Number(f.lastAmt) : null,
-    });
+    }));
   }
   return out;
 }
@@ -95,6 +105,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
 let lastCompEnd = 0;
 document.addEventListener('compositionend', () => { lastCompEnd = Date.now(); }, true);
 function bindEnter(el, fn) {
+  if (!el) return; // 新旧版混装时元素可能不存在，别让整个初始化崩掉
   el.addEventListener('keydown', e => {
     if (e.key !== 'Enter') return;
     if (e.isComposing || e.keyCode === 229 || Date.now() - lastCompEnd < 120) return;
@@ -144,9 +155,14 @@ function ensureDay(ds) {
 }
 function dayTotals(ds) {
   const d = day(ds);
-  let cal = 0, pro = 0;
-  for (const e of d.entries) { cal += e.cal; pro += e.pro; }
-  return { cal: Math.round(cal), pro: Math.round(pro * 10) / 10 };
+  let cal = 0, pro = 0, fat = 0, carb = 0, hasFat = false, hasCarb = false;
+  for (const e of d.entries) {
+    cal += e.cal; pro += e.pro;
+    // 区分「没记脂肪」和「脂肪是 0」：老记录没有这两个字段，不能当 0 算进平均
+    if (typeof e.fat === 'number') { fat += e.fat; hasFat = true; }
+    if (typeof e.carb === 'number') { carb += e.carb; hasCarb = true; }
+  }
+  return { cal: Math.round(cal), pro: r1(pro), fat: r1(fat), carb: r1(carb), hasFat, hasCarb };
 }
 
 function renderDateNav() {
@@ -187,6 +203,8 @@ function renderSummary() {
   const proFill = $('#pro-fill');
   proFill.style.width = Math.min(t.pro / s.proTarget * 100, 100) + '%';
   const proDone = t.pro >= s.proTarget;
+  setMacroLine('fat', '脂肪', t.fat, s.fatTarget);
+  setMacroLine('carb', '碳水', t.carb, s.carbTarget);
   $('#sum-note').innerHTML = (overCal
     ? '<span class="over-txt">⚠ 已超出 ' + (t.cal - s.calTarget) + ' 大卡</span>'
     : '还可摄入 <b>' + remain + '</b> 大卡')
@@ -199,6 +217,21 @@ function renderSummary() {
     : (viewDate === todayStr() ? '<button id="go-weight">今天还没记体重 →</button>' : '');
   const gw = $('#go-weight');
   if (gw) gw.onclick = () => switchTab('weight');
+}
+
+// 脂肪/碳水：有目标就画进度条，没目标只显示克数
+function setMacroLine(key, label, val, target) {
+  // .sl-head 是 space-between 的 flex，没目标时数值和单位要包在一个元素里，否则会被拉散
+  $('#' + key + '-head').innerHTML = target
+    ? label + ' <b>' + val + '</b>&thinsp;/&thinsp;' + target + ' 克'
+    : label + ' <span><b>' + val + '</b> 克</span>';
+  const track = $('#' + key + '-track');
+  if (target) {
+    track.style.display = '';
+    $('#' + key + '-fill').style.width = Math.min(val / target * 100, 100) + '%';
+  } else {
+    track.style.display = 'none';
+  }
 }
 
 function renderMealSeg() {
@@ -223,7 +256,7 @@ function renderChips() {
   document.querySelectorAll('#chips .chip').forEach(b => {
     b.onclick = () => {
       const [name, f] = top[b.dataset.i];
-      addEntry(name, f.cal, f.pro, selMeal);
+      addEntry({ name, cal: f.cal, pro: f.pro, fat: f.fat, carb: f.carb, meal: selMeal });
       toast('已添加「' + name + '」');
     };
   });
@@ -242,8 +275,7 @@ function renderEntries() {
     if (cp) cp.onclick = () => {
       const cur = ensureDay(viewDate);
       for (const e of prev.entries) {
-        const c = { id: uid(), name: e.name, cal: e.cal, pro: e.pro, meal: e.meal, ts: Date.now() };
-        if (e.lib) c.lib = true;
+        const c = Object.assign({}, e, { id: uid(), ts: Date.now() });
         cur.entries.push(c);
       }
       save(); renderRecord(); toast('已复制 ' + prev.entries.length + ' 条记录');
@@ -254,14 +286,17 @@ function renderEntries() {
   for (const m of MEALS) {
     const list = d.entries.filter(e => e.meal === m);
     if (!list.length) continue;
-    let mc = 0, mp = 0;
-    list.forEach(e => { mc += e.cal; mp += e.pro; });
+    let mc = 0, mp = 0, mf = 0, mb = 0;
+    list.forEach(e => { mc += e.cal; mp += e.pro; mf += e.fat || 0; mb += e.carb || 0; });
     html += '<div class="meal-group"><div class="meal-head">' + m +
-      '<span>' + Math.round(mc) + ' 大卡 · 蛋白 ' + (Math.round(mp * 10) / 10) + ' 克</span></div>';
+      '<span>' + Math.round(mc) + ' 大卡 · 蛋' + r1(mp) + ' 脂' + r1(mf) + ' 碳' + r1(mb) + '</span></div>';
     for (const e of list) {
+      let nums = '<b>' + e.cal + '</b> 大卡 · 蛋' + e.pro;
+      if (typeof e.fat === 'number') nums += ' 脂' + e.fat;
+      if (typeof e.carb === 'number') nums += ' 碳' + e.carb;
       html += '<div class="entry' + (e.id === editId ? ' editing' : '') + '" data-id="' + e.id + '">' +
         '<div class="e-name">' + esc(e.name) + '</div>' +
-        '<div class="e-nums"><b>' + e.cal + '</b> 大卡 · ' + e.pro + ' 克</div>' +
+        '<div class="e-nums">' + nums + '</div>' +
         '<button class="e-del" data-id="' + e.id + '" title="删除">✕</button></div>';
     }
     html += '</div>';
@@ -277,18 +312,26 @@ function renderEntries() {
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
-function learnFood(name, cal, pro) {
-  const f = state.foods[name] || { cal: 0, pro: 0, count: 0, last: 0 };
-  f.cal = cal; f.pro = pro; f.count++; f.last = Date.now();
+function learnFood(name, cal, pro, fat, carb) {
+  const f = state.foods[name] || { count: 0 };
+  f.cal = cal; f.pro = pro;
+  // 没填的不写，免得把「没记」固化成「确定是 0」
+  if (typeof fat === 'number') f.fat = fat;
+  if (typeof carb === 'number') f.carb = carb;
+  f.count++; f.last = Date.now();
   state.foods[name] = f;
 }
 
-function addEntry(name, cal, pro, meal, opts) {
-  const e = { id: uid(), name, cal, pro, meal, ts: Date.now() };
+// data: {name, cal, pro, fat, carb, meal}；fat/carb 非数字表示「没记」，不落字段
+function addEntry(data, opts) {
+  const e = { id: uid(), name: data.name, cal: data.cal, pro: data.pro,
+    meal: data.meal, ts: Date.now() };
+  if (typeof data.fat === 'number') e.fat = data.fat;
+  if (typeof data.carb === 'number') e.carb = data.carb;
   if (opts && opts.lib) e.lib = true; // 标记来自食物库，编辑时也不进常用食物
   ensureDay(viewDate).entries.push(e);
   // 食物库带克数的条目不进「常用食物」，不然会被各种克数变体挤满
-  if (!opts || opts.learn !== false) learnFood(name, cal, pro);
+  if (!opts || opts.learn !== false) learnFood(data.name, data.cal, data.pro, data.fat, data.carb);
   save();
   renderRecord();
 }
@@ -299,7 +342,7 @@ let editFood = null;  // 正在编辑的食物（null = 新建）
 let foodUnit = 'g100';
 
 function unitWord(f) { return f.unit === 'serving' ? '份' : '克'; }
-function perWord(f) { return f.unit === 'serving' ? '每份' : '每100克'; }
+function perWord(f) { return f.unit === 'serving' ? '每份' : '每' + (f.base || 100) + '克'; }
 
 function renderLibrary() {
   const box = $('#lib-chips');
@@ -307,7 +350,7 @@ function renderLibrary() {
     (b.count || 0) - (a.count || 0) || (b.last || 0) - (a.last || 0));
   let html = foods.map(f =>
     '<button class="chip" data-id="' + esc(f.id) + '">' + esc(f.name) +
-    '<small>' + esc(String(f.cal)) + '大卡/' + (f.unit === 'serving' ? '份' : '100克') + '</small></button>').join('');
+    '<small>' + esc(String(f.cal)) + '大卡/' + (f.unit === 'serving' ? '份' : esc(String(f.base || 100)) + '克') + '</small></button>').join('');
   html += '<button class="chip chip-new" id="lib-new">＋ 新建食物</button>';
   if (!foods.length) {
     html = '<div class="chips-empty">把常吃的食物存进来（如：鸡胸肉，每100克 133大卡 / 31克蛋白），' +
@@ -323,7 +366,8 @@ function openAmt(id) {
   if (!f) return;
   amtFood = f;
   $('#amt-title').textContent = f.name;
-  $('#amt-info').textContent = perWord(f) + ' ' + f.cal + ' 大卡 · 蛋白质 ' + f.pro + ' 克';
+  $('#amt-info').textContent = perWord(f) + '：' + f.cal + ' 大卡 · 蛋白' + f.pro +
+    ' · 脂肪' + (f.fat || 0) + ' · 碳水' + (f.carb || 0) + ' 克';
   $('#amt-unit').textContent = unitWord(f);
   const inp = $('#amt-input');
   inp.value = f.lastAmt || (f.unit === 'serving' ? 1 : 100);
@@ -336,13 +380,16 @@ function openAmt(id) {
 function amtCompute() {
   const amt = parseFloat($('#amt-input').value);
   if (!amtFood || !Number.isFinite(amt) || amt <= 0 || amt > 10000) return null;
-  const k = amtFood.unit === 'serving' ? amt : amt / 100;
-  return { amt, cal: Math.round(amtFood.cal * k), pro: Math.round(amtFood.pro * k * 10) / 10 };
+  const k = amtFood.unit === 'serving' ? amt : amt / (amtFood.base || 100);
+  return { amt, cal: Math.round(amtFood.cal * k), pro: r1(amtFood.pro * k),
+    fat: r1((amtFood.fat || 0) * k), carb: r1((amtFood.carb || 0) * k) };
 }
 
 function updateAmtPreview() {
   const c = amtCompute();
-  $('#amt-preview').textContent = c ? '≈ ' + c.cal + ' 大卡 · 蛋白质 ' + c.pro + ' 克 · 记入' + selMeal : '　';
+  $('#amt-preview').textContent = c
+    ? '≈ ' + c.cal + ' 大卡 · 蛋' + c.pro + ' 脂' + c.fat + ' 碳' + c.carb + ' · 记入' + selMeal
+    : '　';
 }
 
 function submitAmt() {
@@ -353,7 +400,7 @@ function submitAmt() {
   amtFood.count = (amtFood.count || 0) + 1;
   amtFood.last = Date.now();
   $('#modal-amt').classList.remove('show');
-  addEntry(name, c.cal, c.pro, selMeal, { learn: false, lib: true });
+  addEntry({ name, cal: c.cal, pro: c.pro, fat: c.fat, carb: c.carb, meal: selMeal }, { learn: false, lib: true });
   toast('已添加「' + name + '」');
 }
 
@@ -362,8 +409,11 @@ function openFoodModal(id) {
   foodUnit = editFood ? editFood.unit : 'g100';
   $('#food-title').textContent = editFood ? '编辑食物' : '新建食物';
   $('#food-name').value = editFood ? editFood.name : '';
+  $('#food-base').value = editFood ? (editFood.base || 100) : 100;
   $('#food-cal').value = editFood ? editFood.cal : '';
   $('#food-pro').value = editFood ? editFood.pro : '';
+  $('#food-fat').value = editFood ? (editFood.fat || 0) : '';
+  $('#food-carb').value = editFood ? (editFood.carb || 0) : '';
   $('#food-del').classList.toggle('hidden', !editFood);
   renderUnitSeg();
   $('#modal-food').classList.add('show');
@@ -374,25 +424,37 @@ function renderUnitSeg() {
   document.querySelectorAll('#food-unit-seg button').forEach(b => {
     b.classList.toggle('sel', b.dataset.u === foodUnit);
   });
-  const u = foodUnit === 'serving' ? '/份' : '/100克';
-  $('#food-cal-unit').textContent = '大卡' + u;
-  $('#food-pro-unit').textContent = '蛋白' + u;
+  $('#food-base-row').style.display = foodUnit === 'serving' ? 'none' : '';
+  $('#food-per-hint').textContent = foodUnit === 'serving'
+    ? '填每一份（或每一个）含多少：'
+    : '按包装营养成分表，填每这么多克含多少：';
 }
 
 function saveFood() {
   const name = $('#food-name').value.trim();
+  const base = parseFloat($('#food-base').value);
   const cal = parseFloat($('#food-cal').value);
   const pro = parseFloat($('#food-pro').value);
+  const fat = parseFloat($('#food-fat').value);
+  const carb = parseFloat($('#food-carb').value);
   if (!name) { toast('请填写食物名称'); $('#food-name').focus(); return; }
+  if (foodUnit === 'g100' && !(Number.isFinite(base) && base > 0 && base <= 10000)) {
+    toast('请填写基准克数（每多少克）'); $('#food-base').focus(); return;
+  }
   if (!validNum(cal, 10000)) { toast('请填写热量'); $('#food-cal').focus(); return; }
-  const c = Math.round(cal * 10) / 10;
-  const p = validNum(pro, 5000) ? Math.round(pro * 10) / 10 : 0;
+  const b = foodUnit === 'g100' ? r1(base) : 100;
+  const c = r1(cal);
+  const p = validNum(pro, 5000) ? r1(pro) : 0;
+  const ft = validNum(fat, 5000) ? r1(fat) : 0;
+  const cb = validNum(carb, 5000) ? r1(carb) : 0;
   if (editFood) {
     // 换了计量单位后，上次填的数量就没意义了，清掉防止按错单位预填
     if (editFood.unit !== foodUnit) editFood.lastAmt = null;
-    editFood.name = name; editFood.unit = foodUnit; editFood.cal = c; editFood.pro = p;
+    editFood.name = name; editFood.unit = foodUnit; editFood.base = b;
+    editFood.cal = c; editFood.pro = p; editFood.fat = ft; editFood.carb = cb;
   } else {
-    state.library.push({ id: uid(), name, unit: foodUnit, cal: c, pro: p, count: 0, last: 0, lastAmt: null });
+    state.library.push({ id: uid(), name, unit: foodUnit, base: b, cal: c, pro: p, fat: ft, carb: cb,
+      count: 0, last: 0, lastAmt: null });
   }
   save();
   $('#modal-food').classList.remove('show');
@@ -433,6 +495,8 @@ function startEdit(id) {
   $('#f-name').value = e.name;
   $('#f-cal').value = e.cal;
   $('#f-pro').value = e.pro;
+  $('#f-fat').value = typeof e.fat === 'number' ? e.fat : '';
+  $('#f-carb').value = typeof e.carb === 'number' ? e.carb : '';
   selMeal = e.meal;
   $('#btn-add').textContent = '保存修改';
   $('#btn-cancel').classList.remove('hidden');
@@ -442,7 +506,7 @@ function startEdit(id) {
 
 function cancelEdit() {
   editId = null;
-  $('#f-name').value = ''; $('#f-cal').value = ''; $('#f-pro').value = '';
+  ['f-name', 'f-cal', 'f-pro', 'f-fat', 'f-carb'].forEach(id => { $('#' + id).value = ''; });
   $('#btn-add').textContent = '添加';
   $('#btn-cancel').classList.add('hidden');
   renderEntries();
@@ -452,19 +516,29 @@ function submitForm() {
   const name = $('#f-name').value.trim();
   const cal = parseFloat($('#f-cal').value);
   const pro = parseFloat($('#f-pro').value);
+  const fat = parseFloat($('#f-fat').value);
+  const carb = parseFloat($('#f-carb').value);
   if (!name) { toast('请填写食物名称'); $('#f-name').focus(); return; }
   if (!validNum(cal, 50000)) { toast('请填写热量（大卡）'); $('#f-cal').focus(); return; }
-  const p = validNum(pro, 5000) ? Math.round(pro * 10) / 10 : 0;
+  const p = validNum(pro, 5000) ? r1(pro) : 0;
+  // 脂肪/碳水留空 = 没记（不写字段），不等于 0
+  const ft = validNum(fat, 5000) ? r1(fat) : null;
+  const cb = validNum(carb, 5000) ? r1(carb) : null;
   const c = Math.round(cal);
   if (editId) {
     const e = ensureDay(viewDate).entries.find(x => x.id === editId);
-    if (e) { e.name = name; e.cal = c; e.pro = p; e.meal = selMeal; if (!e.lib) learnFood(name, c, p); }
+    if (e) {
+      e.name = name; e.cal = c; e.pro = p; e.meal = selMeal;
+      if (ft === null) delete e.fat; else e.fat = ft;
+      if (cb === null) delete e.carb; else e.carb = cb;
+      if (!e.lib) learnFood(name, c, p, ft, cb);
+    }
     save();
     const kept = '已保存修改';
     cancelEdit(); renderRecord(); toast(kept);
   } else {
-    addEntry(name, c, p, selMeal);
-    $('#f-name').value = ''; $('#f-cal').value = ''; $('#f-pro').value = '';
+    addEntry({ name, cal: c, pro: p, fat: ft, carb: cb, meal: selMeal });
+    ['f-name', 'f-cal', 'f-pro', 'f-fat', 'f-carb'].forEach(id => { $('#' + id).value = ''; });
     $('#f-name').focus();
     toast('已添加「' + name + '」');
   }
@@ -626,19 +700,25 @@ function renderStats() {
   const s = state.settings;
   const today = todayStr();
   // 最近 7 天（有记录的天）平均
-  let cals = [], pros = [], proHit = 0, recDays = 0;
+  let cals = [], pros = [], fats = [], carbs = [], proHit = 0, recDays = 0;
   for (let i = 0; i < 7; i++) {
     const ds = addDays(today, -i);
     const d = day(ds);
     if (d.entries.length) {
       const t = dayTotals(ds);
       cals.push(t.cal); pros.push(t.pro);
+      // 整天都没记脂肪/碳水的日子不算进平均，否则老记录会把均值拉低
+      if (t.hasFat) fats.push(t.fat);
+      if (t.hasCarb) carbs.push(t.carb);
       if (t.pro >= s.proTarget) proHit++;
       recDays++;
     }
   }
-  $('#st-cal7').innerHTML = cals.length ? Math.round(cals.reduce((a, b) => a + b, 0) / cals.length) + '<small> 大卡</small>' : '—';
-  $('#st-pro7').innerHTML = pros.length ? Math.round(pros.reduce((a, b) => a + b, 0) / pros.length) + '<small> 克</small>' : '—';
+  const avg = a => Math.round(a.reduce((x, y) => x + y, 0) / a.length);
+  $('#st-cal7').innerHTML = cals.length ? avg(cals) + '<small> 大卡</small>' : '—';
+  $('#st-pro7').innerHTML = pros.length ? avg(pros) + '<small> 克</small>' : '—';
+  $('#st-fat7').innerHTML = fats.length ? avg(fats) + '<small> 克</small>' : '—';
+  $('#st-carb7').innerHTML = carbs.length ? avg(carbs) + '<small> 克</small>' : '—';
   $('#st-prohit').innerHTML = recDays ? proHit + '<small> / ' + recDays + ' 天</small>' : '—';
   // 连续记录天数（今天没记不打断）
   let streak = 0, ds = today;
@@ -701,10 +781,12 @@ function renderCalChart() {
       const dd = parseD(d.ds);
       const diff = d.t.cal - s.calTarget;
       tip.innerHTML = '<div class="tt-t">' + (dd.getMonth() + 1) + '月' + dd.getDate() + '日 ' + WEEK[dd.getDay()] + '</div>' +
-        '<b>' + d.t.cal + '</b> 大卡（' + (diff > 0 ? '超 ' + diff : '剩 ' + (-diff)) + '）<br>蛋白质 <b>' + d.t.pro + '</b> 克';
+        '<b>' + d.t.cal + '</b> 大卡（' + (diff > 0 ? '超 ' + diff : '剩 ' + (-diff)) + '）<br>' +
+        '蛋白 <b>' + d.t.pro + '</b> · 脂肪 <b>' + d.t.fat + '</b> · 碳水 <b>' + d.t.carb + '</b> 克';
       tip.style.display = 'block';
       const x = PL + (+b.dataset.i) * iw;
-      tip.style.left = Math.min(Math.max(x - 40, 0), box.clientWidth - 130) + 'px';
+      // 用真实宽度钳制，内容变长（多了脂肪碳水）也不会被右边缘裁掉
+      tip.style.left = Math.min(Math.max(x - 40, 0), Math.max(box.clientWidth - tip.offsetWidth, 0)) + 'px';
       tip.style.top = '6px';
     };
     b.addEventListener('mouseenter', show);
@@ -718,6 +800,8 @@ function renderSettings() {
   const s = state.settings;
   $('#set-cal').value = s.calTarget;
   $('#set-pro').value = s.proTarget;
+  $('#set-fat').value = s.fatTarget || '';
+  $('#set-carb').value = s.carbTarget || '';
   $('#set-weight').value = s.weightTarget || '';
   $('#set-height').value = s.height || '';
 }
@@ -726,10 +810,14 @@ function saveSettings() {
   const s = state.settings;
   const cal = parseInt($('#set-cal').value, 10);
   const pro = parseInt($('#set-pro').value, 10);
+  const fat = parseInt($('#set-fat').value, 10);
+  const carb = parseInt($('#set-carb').value, 10);
   const wt = parseFloat($('#set-weight').value);
   const h = parseFloat($('#set-height').value);
   if (cal > 0) s.calTarget = cal;
   if (pro > 0) s.proTarget = pro;
+  s.fatTarget = fat > 0 ? fat : null;
+  s.carbTarget = carb > 0 ? carb : null;
   s.weightTarget = wt > 0 ? wt : null;
   s.height = h > 0 ? h : null;
   save();
@@ -742,14 +830,15 @@ function exportJSON() {
 }
 
 function exportCSV() {
-  let csv = '﻿日期,类型,餐别/项目,热量(大卡),蛋白质(克),体重(kg)\n';
+  let csv = '﻿日期,类型,餐别/项目,热量(大卡),蛋白质(克),脂肪(克),碳水(克),体重(kg)\n';
   const days = Object.keys(state.days).sort();
   for (const ds of days) {
     const d = state.days[ds];
     for (const e of (d.entries || [])) {
-      csv += ds + ',饮食,' + e.meal + '·' + String(e.name).replace(/[,\n]/g, ' ') + ',' + e.cal + ',' + e.pro + ',\n';
+      csv += ds + ',饮食,' + e.meal + '·' + String(e.name).replace(/[,\n]/g, ' ') + ',' + e.cal + ',' + e.pro +
+        ',' + (typeof e.fat === 'number' ? e.fat : '') + ',' + (typeof e.carb === 'number' ? e.carb : '') + ',\n';
     }
-    if (typeof d.weight === 'number') csv += ds + ',体重,,,,' + d.weight + '\n';
+    if (typeof d.weight === 'number') csv += ds + ',体重,,,,,,' + d.weight + '\n';
   }
   openIOModal('导出表格（CSV）', '点「复制」后粘贴到 Excel / Numbers 里即可。', csv, false);
 }
@@ -838,10 +927,14 @@ document.addEventListener('DOMContentLoaded', () => {
   // 表单
   $('#btn-add').onclick = submitForm;
   $('#btn-cancel').onclick = cancelEdit;
-  ['f-name', 'f-cal', 'f-pro'].forEach(id => bindEnter($('#' + id), submitForm));
+  ['f-name', 'f-cal', 'f-pro', 'f-fat', 'f-carb'].forEach(id => bindEnter($('#' + id), submitForm));
   $('#f-name').addEventListener('change', () => {
     const f = state.foods[$('#f-name').value.trim()];
-    if (f && !$('#f-cal').value) { $('#f-cal').value = f.cal; $('#f-pro').value = f.pro; }
+    if (f && !$('#f-cal').value) {
+      $('#f-cal').value = f.cal; $('#f-pro').value = f.pro;
+      $('#f-fat').value = typeof f.fat === 'number' ? f.fat : '';
+      $('#f-carb').value = typeof f.carb === 'number' ? f.carb : '';
+    }
   });
   // 体重
   $('#btn-weight').onclick = submitWeight;
@@ -880,7 +973,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('#food-cancel').onclick = () => $('#modal-food').classList.remove('show');
   $('#food-save').onclick = saveFood;
   $('#food-del').onclick = delFood;
-  ['food-name', 'food-cal', 'food-pro'].forEach(id => bindEnter($('#' + id), saveFood));
+  ['food-name', 'food-base', 'food-cal', 'food-pro', 'food-fat', 'food-carb'].forEach(id => bindEnter($('#' + id), saveFood));
   // Toast 撤销
   $('#toast-undo').onclick = () => { if (undoFn) undoFn(); $('#toast').style.display = 'none'; undoFn = null; };
   // 标签栏

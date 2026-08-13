@@ -13,6 +13,8 @@
   --accent-soft: rgba(42, 120, 214, 0.12);
   --protein: #eb6834;       /* 蛋白质（系列2·橙） */
   --protein-soft: rgba(235, 104, 52, 0.12);
+  --fat: #1baf7a;           /* 脂肪（系列3·青） */
+  --carb: #eda100;          /* 碳水（系列4·黄） */
   --good: #0ca30c;
   --good-text: #006300;
   --warn: #fab219;
@@ -34,6 +36,8 @@
     --accent-soft: rgba(57, 135, 229, 0.18);
     --protein: #d95926;
     --protein-soft: rgba(217, 89, 38, 0.20);
+    --fat: #199e70;
+    --carb: #c98500;
     --good-text: #0ca30c;
     --shadow: none;
   }
@@ -151,6 +155,8 @@ main {
 .sl-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
 .sl-fill.cal { background: var(--accent); }
 .sl-fill.pro { background: var(--protein); }
+.sl-fill.fat { background: var(--fat); }
+.sl-fill.carb { background: var(--carb); }
 .sl-fill.over { background: var(--serious); }
 .sum-note { font-size: 12px; color: var(--muted); }
 .sum-note .over-txt { color: var(--serious); font-weight: 600; }
@@ -174,6 +180,13 @@ main {
 .add-form input::placeholder { color: var(--muted); }
 .num-row { display: flex; gap: 8px; margin-bottom: 8px; }
 .num-row .num-box { flex: 1; position: relative; }
+.num-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.num-grid .num-box { position: relative; }
 .num-box .unit {
   position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
   font-size: 12px; color: var(--muted); pointer-events: none;
@@ -254,8 +267,21 @@ main {
 }
 .food-form input:focus { border-color: var(--accent); }
 .food-form input::placeholder { color: var(--muted); }
-.food-form .num-row { margin-bottom: 12px; }
-.food-form .num-row input { margin-bottom: 0; }
+.food-form .num-grid { margin-bottom: 12px; }
+.food-form .num-grid input { margin-bottom: 0; }
+.base-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--ink-2);
+  margin-bottom: 8px;
+}
+.base-row input {
+  width: 76px !important;
+  margin-bottom: 0 !important;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.base-row span:last-child { flex: 1; font-size: 12px; color: var(--muted); }
+.food-per-hint { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
 .modal .m-btns .m-left { margin-right: auto; }
 .modal .m-btns .danger { color: var(--critical); border-color: var(--critical); }
 #modal-amt .num-box input, #modal-amt .unit { font-variant-numeric: tabular-nums; }
@@ -498,4 +524,9 @@ main {
   .summary-flex { gap: 12px; }
   .ring-wrap { width: 116px; height: 116px; }
   .ring-center .rc-val { font-size: 22px; }
+  /* 加了脂肪碳水后一行放不下，数值换到第二行，食物名才有地方显示 */
+  .entry { flex-wrap: wrap; row-gap: 2px; }
+  .entry .e-name { flex: 1 1 auto; }
+  .entry .e-del { order: 2; }
+  .entry .e-nums { order: 3; flex: 1 1 100%; text-align: left; font-size: 12px; }
 }

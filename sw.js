@@ -1,5 +1,5 @@
 /* 饮食记录 Service Worker —— 离线缓存（stale-while-revalidate） */
-const CACHE = 'diet-v2';
+const CACHE = 'diet-v3';
 const ASSETS = [
   './',
   './index.html',

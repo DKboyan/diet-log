@@ -51,6 +51,14 @@
             <div class="sl-head" id="pro-head">蛋白质</div>
             <div class="sl-track"><div class="sl-fill pro" id="pro-fill" style="width:0%"></div></div>
           </div>
+          <div class="sum-line">
+            <div class="sl-head" id="fat-head">脂肪</div>
+            <div class="sl-track" id="fat-track"><div class="sl-fill fat" id="fat-fill" style="width:0%"></div></div>
+          </div>
+          <div class="sum-line">
+            <div class="sl-head" id="carb-head">碳水</div>
+            <div class="sl-track" id="carb-track"><div class="sl-fill carb" id="carb-fill" style="width:0%"></div></div>
+          </div>
           <div class="sum-note" id="sum-note"></div>
           <div class="weight-link" id="weight-line"></div>
         </div>
@@ -63,9 +71,11 @@
         <input id="f-name" list="food-datalist" placeholder="吃了什么？如：鸡胸肉 150g" autocomplete="off">
         <datalist id="food-datalist"></datalist>
       </div>
-      <div class="num-row">
+      <div class="num-grid">
         <div class="num-box"><input id="f-cal" type="number" inputmode="numeric" min="0" placeholder="热量"><span class="unit">大卡</span></div>
         <div class="num-box"><input id="f-pro" type="number" inputmode="decimal" min="0" step="0.1" placeholder="蛋白质"><span class="unit">克</span></div>
+        <div class="num-box"><input id="f-fat" type="number" inputmode="decimal" min="0" step="0.1" placeholder="脂肪（选填）"><span class="unit">克</span></div>
+        <div class="num-box"><input id="f-carb" type="number" inputmode="decimal" min="0" step="0.1" placeholder="碳水（选填）"><span class="unit">克</span></div>
       </div>
       <div class="meal-seg" id="meal-seg"></div>
       <div class="form-btns">
@@ -131,6 +141,10 @@
       <div class="stat-tile"><div class="st-label">7日平均蛋白</div><div class="st-val" id="st-pro7">—</div></div>
     </div>
     <div class="stat-row">
+      <div class="stat-tile"><div class="st-label">7日平均脂肪</div><div class="st-val" id="st-fat7">—</div></div>
+      <div class="stat-tile"><div class="st-label">7日平均碳水</div><div class="st-val" id="st-carb7">—</div></div>
+    </div>
+    <div class="stat-row">
       <div class="stat-tile"><div class="st-label">近7天蛋白达标</div><div class="st-val" id="st-prohit">—</div></div>
       <div class="stat-tile"><div class="st-label">连续记录</div><div class="st-val" id="st-streak">—</div></div>
     </div>
@@ -153,6 +167,14 @@
       <div class="set-row">
         <label>蛋白质目标<span class="set-hint">力量训练建议 体重kg × 1.6~2.2</span></label>
         <input id="set-pro" type="number" inputmode="numeric" min="1"> 克
+      </div>
+      <div class="set-row">
+        <label>脂肪目标<span class="set-hint">选填，填了汇总卡有进度条</span></label>
+        <input id="set-fat" type="number" inputmode="numeric" min="1"> 克
+      </div>
+      <div class="set-row">
+        <label>碳水目标<span class="set-hint">选填，填了汇总卡有进度条</span></label>
+        <input id="set-carb" type="number" inputmode="numeric" min="1"> 克
       </div>
       <div class="set-row">
         <label>目标体重<span class="set-hint">选填，会画在趋势图上</span></label>
@@ -230,12 +252,20 @@
     <div class="food-form">
       <input id="food-name" placeholder="食物名称，如：鸡胸肉" autocomplete="off">
       <div class="meal-seg" id="food-unit-seg">
-        <button data-u="g100">按 100 克算</button>
+        <button data-u="g100">按克数算</button>
         <button data-u="serving">按份 / 个算</button>
       </div>
-      <div class="num-row">
-        <div class="num-box"><input id="food-cal" type="number" inputmode="decimal" min="0" placeholder="热量"><span class="unit" id="food-cal-unit">大卡/100克</span></div>
-        <div class="num-box"><input id="food-pro" type="number" inputmode="decimal" min="0" step="0.1" placeholder="蛋白质"><span class="unit" id="food-pro-unit">蛋白/100克</span></div>
+      <div class="base-row" id="food-base-row">
+        <span>每</span>
+        <input id="food-base" type="number" inputmode="decimal" min="0" value="100">
+        <span>克为基准（按包装营养表填，如「每 40 克」就填 40）</span>
+      </div>
+      <p class="food-per-hint" id="food-per-hint"></p>
+      <div class="num-grid">
+        <div class="num-box"><input id="food-cal" type="number" inputmode="decimal" min="0" placeholder="热量"><span class="unit">大卡</span></div>
+        <div class="num-box"><input id="food-pro" type="number" inputmode="decimal" min="0" step="0.1" placeholder="蛋白质"><span class="unit">克</span></div>
+        <div class="num-box"><input id="food-fat" type="number" inputmode="decimal" min="0" step="0.1" placeholder="脂肪（选填）"><span class="unit">克</span></div>
+        <div class="num-box"><input id="food-carb" type="number" inputmode="decimal" min="0" step="0.1" placeholder="碳水（选填）"><span class="unit">克</span></div>
       </div>
     </div>
     <div class="m-btns">
